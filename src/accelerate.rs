@@ -14,6 +14,11 @@ static ID: AtomicUsize = AtomicUsize::new(0);
 /// Maps from call hashes to return hashes.
 type Accelerator = Mutex<FxHashMap<u128, u128>>;
 
+/// Maximum number of accelerator entries before automatic eviction.
+/// Each entry is ~64 bytes, so 100K entries = ~6.4 MB.
+/// Without this cap, documents with 1M+ memoize calls grow to ~118 MB.
+const MAX_ACCELERATORS: usize = 100_000;
+
 /// Generate a new accelerator.
 pub fn id() -> usize {
     // Get the next ID.
@@ -28,8 +33,8 @@ pub fn evict() {
     // Update the offset.
     *offset = ID.load(Ordering::SeqCst);
 
-    // Clear all accelerators while keeping the memory allocated.
-    vec.iter_mut().for_each(|accelerator| accelerator.lock().clear())
+    // Drop all accelerator entries and free the backing memory.
+    *vec = Vec::new();
 }
 
 /// Get an accelerator by ID.
@@ -57,6 +62,18 @@ pub fn get(id: usize) -> Option<MappedRwLockReadGuard<'static, Accelerator>> {
 #[cold]
 fn resize(len: usize) {
     let mut pair = ACCELERATORS.write();
+
+    // If the accelerator Vec would exceed the cap, evict and reset.
+    // This bounds memory to MAX_ACCELERATORS * ~64 bytes (~6.4 MB)
+    // instead of growing unboundedly (~118 MB for 1M+ calls).
+    // The accelerator is a performance optimization only — evicting it
+    // forces fallback to the slower full-cache lookup path.
+    if len > MAX_ACCELERATORS {
+        pair.0 = ID.load(Ordering::SeqCst);
+        pair.1 = Vec::new();
+        return;
+    }
+
     if len > pair.1.len() {
         pair.1.resize_with(len, || Mutex::new(FxHashMap::default()));
     }
