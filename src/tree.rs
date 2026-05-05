@@ -193,6 +193,15 @@ impl<C, T> CallTree<C, T> {
         self.start.retain(|_, node| exists(*node));
     }
 
+    /// Shrinks all internal collections to fit their current length.
+    /// Call after `retain` to reclaim capacity freed by removed entries.
+    pub fn shrink_to_fit(&mut self) {
+        self.inner.shrink_to_fit();
+        self.leaves.shrink_to_fit();
+        self.edges.shrink_to_fit();
+        self.start.shrink_to_fit();
+    }
+
     /// Checks a few invariants of the data structure.
     #[cfg(test)]
     fn assert_consistency(&self) {
